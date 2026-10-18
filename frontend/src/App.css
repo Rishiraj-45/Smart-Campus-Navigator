@@ -220,3 +220,47 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
+/* Accessible route option */
+.accessibility-option {
+  margin: 8px 0 24px;
+  padding: 16px;
+  background: #f5f7ff;
+  border: 1px solid #e0e7ff;
+  border-radius: 12px;
+}
+
+.accessibility-option label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #172033;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.accessibility-option input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #4263eb;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.accessibility-option input[type='checkbox']:disabled {
+  cursor: not-allowed;
+}
+
+.accessibility-help {
+  margin: 10px 0 0 28px;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.route-type {
+  margin-top: 18px;
+  color: #344054;
+  font-size: 14px;
+}

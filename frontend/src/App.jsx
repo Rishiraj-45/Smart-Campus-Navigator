@@ -7,6 +7,7 @@ function App() {
   const [locations, setLocations] = useState([])
   const [start, setStart] = useState('')
   const [destination, setDestination] = useState('')
+  const [accessible, setAccessible] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [routing, setRouting] = useState(false)
@@ -65,7 +66,7 @@ function App() {
       const params = new URLSearchParams({
         start,
         destination,
-        accessible: 'false',
+        accessible: String(accessible),
       })
 
       const response = await fetch(
@@ -97,6 +98,7 @@ function App() {
   const handleReset = () => {
     setStart('')
     setDestination('')
+    setAccessible(false)
     setRouteResult(null)
     setError('')
   }
@@ -181,6 +183,30 @@ function App() {
               </select>
             </div>
 
+            {/* Accessible route checkbox */}
+            <div className="accessibility-option">
+              <label htmlFor="accessible">
+                <input
+                  id="accessible"
+                  type="checkbox"
+                  checked={accessible}
+                  onChange={(event) => {
+                    setAccessible(event.target.checked)
+                    setError('')
+                    setRouteResult(null)
+                  }}
+                  disabled={loading || routing}
+                />
+
+                <span>Accessible Route (Prefer Elevator)</span>
+              </label>
+
+              <p className="accessibility-help">
+                Choose this option to request an accessible route
+                that uses an elevator where available.
+              </p>
+            </div>
+
             {/* Error message */}
             {error && (
               <p className="error-message" role="alert">
@@ -220,6 +246,14 @@ function App() {
                     {routeResult.destination}
                   </p>
                 </div>
+
+                {/* Route type */}
+                <p className="route-type">
+                  <strong>Route type:</strong>{' '}
+                  {accessible
+                    ? 'Accessible route'
+                    : 'Standard route'}
+                </p>
 
                 {/* Distance and walking time */}
                 <div className="route-summary">
