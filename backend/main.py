@@ -30,7 +30,35 @@ app = FastAPI(
 # Database Initialization
 # --------------------------------------------------
 
+
 Base.metadata.create_all(bind=engine)
+
+# Populate the database with campus locations from the map.
+db = SessionLocal()
+
+try:
+    existing_names = {
+        name for (name,) in db.query(Location.name).all()
+    }
+
+    for node_name, info in MAP_LOCATIONS.items():
+        if node_name in existing_names:
+            continue
+
+        db.add(
+            Location(
+                name=node_name,
+                type=info.get("type", "location"),
+                building=info.get("building", "Academic Block"),
+                floor=info.get("floor") or 0,
+                accessible=info.get("accessible", False),
+            )
+        )
+
+    db.commit()
+
+finally:
+    db.close()
 
 
 # --------------------------------------------------
