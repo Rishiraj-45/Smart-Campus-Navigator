@@ -1,78 +1,130 @@
+
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.database import SessionLocal
+from backend.database import Base, engine, SessionLocal
 from backend.models import Location
 
 from backend.navigation.campus import CAMPUS_GRAPH
+from backend.navigation.campus_map_data import LOCATIONS as MAP_LOCATIONS
 from backend.navigation.pathfinder import dijkstra
-from backend.navigation.locations import LOCATIONS
 from backend.navigation.directions import generate_directions
 from backend.navigation.route_utils import calculate_walking_time
+from backend.navigation.floor_transitions import get_floor_transitions
 
+
+# --------------------------------------------------
+# FastAPI Application
+# --------------------------------------------------
 
 app = FastAPI(
     title="Smart Campus Navigator",
     description="Indoor Navigation and Campus Assistance System",
-    version="1.0.0"
+    version="1.1.0",
 )
+
+
+# --------------------------------------------------
+# Database Initialization
+# --------------------------------------------------
+
+Base.metadata.create_all(bind=engine)
+
+
+# --------------------------------------------------
+# CORS Configuration
+# --------------------------------------------------
+
+allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
+
+if frontend_url:
+    allowed_origins.append(frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+# --------------------------------------------------
+# Home / Health Check
+# --------------------------------------------------
+
 @app.get("/")
 def home():
+    """Check whether the API is running."""
     return {
         "message": "Smart Campus Navigator API is running!"
     }
 
 
+# --------------------------------------------------
+# Get All Campus Locations
+# --------------------------------------------------
+
 @app.get("/locations")
 def get_locations():
-    """Return all campus locations from the database."""
+    """Return all locations from the generated campus map."""
 
-    db = SessionLocal()
+    locations = []
 
-    try:
-        locations = db.query(Location).all()
+    for node_name, info in MAP_LOCATIONS.items():
+        locations.append({
+            "id": node_name,
+            "name": node_name,
+            "type": info.get("type", "location"),
+            "building": info.get("building", "Academic Block"),
+            "floor": info.get("floor"),
+            "accessible": info.get("accessible", False),
+        })
 
-        return {
-            "count": len(locations),
-            "locations": [
-                {
-                    "id": location.id,
-                    "name": location.name,
-                    "type": location.type,
-                    "building": location.building,
-                    "floor": location.floor,
-                    "accessible": location.accessible
-                }
-                for location in locations
-            ]
-        }
+    # Ground Floor first, then First Floor.
+    locations.sort(
+        key=lambda location: (
+            location["floor"]
+            if location["floor"] is not None
+            else 99,
+            location["name"].casefold(),
+        )
+    )
 
-    finally:
-        db.close()
+    return {
+        "count": len(locations),
+        "locations": locations,
+    }
+
+
+# --------------------------------------------------
+# Get Details of a Single Location
+# --------------------------------------------------
 
 @app.get("/location/{location_name}")
 def get_location(location_name: str):
-    """Return details of a single campus location."""
+    """Return details of a location stored in the database."""
 
     db = SessionLocal()
 
     try:
-        location = db.query(Location).filter(
-            Location.name == location_name
-        ).first()
+        location = (
+            db.query(Location)
+            .filter(Location.name == location_name)
+            .first()
+        )
 
         if not location:
             raise HTTPException(
                 status_code=404,
-                detail=f"Location '{location_name}' not found."
+                detail=f"Location '{location_name}' not found in database.",
             )
 
         return {
@@ -81,56 +133,118 @@ def get_location(location_name: str):
             "type": location.type,
             "building": location.building,
             "floor": location.floor,
-            "accessible": location.accessible
+            "accessible": location.accessible,
         }
 
     finally:
         db.close()
 
+
+# --------------------------------------------------
+# Campus Navigation
+# --------------------------------------------------
+
 @app.get("/navigation")
 def navigate(
     start: str,
     destination: str,
-    accessible: bool = False
+    accessible: bool = False,
 ):
-    """Find the shortest route between two campus locations."""
+    """Find a route between two campus locations."""
 
+    # Validate starting location.
     if start not in CAMPUS_GRAPH:
         raise HTTPException(
             status_code=404,
-            detail=f"Starting location '{start}' not found."
+            detail=f"Starting location '{start}' not found.",
         )
 
+    # Validate destination.
     if destination not in CAMPUS_GRAPH:
         raise HTTPException(
             status_code=404,
-            detail=f"Destination '{destination}' not found."
+            detail=f"Destination '{destination}' not found.",
         )
 
-    path, distance = dijkstra(
+    # Start and destination must be different.
+    if start == destination:
+        raise HTTPException(
+            status_code=400,
+            detail="Starting location and destination cannot be the same.",
+        )
+
+    # Get configured floor transitions.
+    transitions = get_floor_transitions()
+
+    # Calculate the shortest route.
+    path, horizontal_distance = dijkstra(
         CAMPUS_GRAPH,
         start,
         destination,
-        locations=LOCATIONS,
-        accessible_only=accessible
+        locations=MAP_LOCATIONS,
+        accessible_only=accessible,
+        transitions=transitions,
     )
 
     if not path:
         raise HTTPException(
             status_code=404,
-            detail="No route found between these locations."
+            detail=(
+                "No route found between these locations. "
+                "Check the map connections and accessibility options."
+            ),
         )
 
-    walking_time = calculate_walking_time(distance)
+    # Record staircase and lift transitions in the route.
+    vertical_transitions = []
 
-    route_directions = generate_directions(path)
+    for source, target in zip(path, path[1:]):
+        transition = transitions.get((source, target))
+
+        if transition is None:
+            continue
+
+        source_floor = MAP_LOCATIONS.get(source, {}).get("floor")
+        target_floor = MAP_LOCATIONS.get(target, {}).get("floor")
+
+        vertical_transitions.append({
+            "from": source,
+            "to": target,
+            "type": transition.get("type", "stairs"),
+            "from_floor": source_floor,
+            "to_floor": target_floor,
+            "vertical_distance_meters": None,
+        })
+
+    # Generate written, step-by-step directions.
+    route_directions = generate_directions(
+        path,
+        locations=MAP_LOCATIONS,
+        transitions=transitions,
+    )
+
+    # Walking-time estimate uses known horizontal distance only.
+    walking_time = calculate_walking_time(horizontal_distance)
 
     return {
-    "start": start,
-    "destination": destination,
-    "accessible_route": accessible,
-    "route": path,
-    "distance_meters": distance,
-    "walking_time_minutes": walking_time,
-    "directions": route_directions
-}
+        "start": start,
+        "destination": destination,
+        "accessible_route": accessible,
+        "route": path,
+
+        "distance_meters": round(horizontal_distance, 2),
+        "horizontal_distance_meters": round(horizontal_distance, 2),
+
+        "vertical_transition_count": len(vertical_transitions),
+        "vertical_transitions": vertical_transitions,
+
+        "walking_time_minutes": walking_time,
+
+        "distance_note": (
+            "Distance and walking time include known horizontal "
+            "segments only. Vertical travel distances and times are "
+            "not included because they have not been verified."
+        ),
+
+        "directions": route_directions,
+    }
