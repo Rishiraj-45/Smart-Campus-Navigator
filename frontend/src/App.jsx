@@ -2,7 +2,9 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://127.0.0.1:8000";
 const HIDDEN_LOCATIONS = new Set(["stairs 9", "stairs 9 (2)"]);
 
 function getName(location) {
