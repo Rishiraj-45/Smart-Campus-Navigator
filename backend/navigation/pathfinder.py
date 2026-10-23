@@ -12,15 +12,16 @@ def dijkstra(
     transitions=None,
 ):
     """
-    Find the shortest route using known horizontal edge distances.
+    Find the minimum-cost route using Dijkstra's algorithm.
 
     In accessible mode:
-    - Staircase nodes cannot be used.
+    - Locations marked accessible=False cannot be used.
+    - Staircase locations cannot be used.
     - Stair transitions cannot be used.
     - Elevator transitions remain available.
 
-    Vertical transition distances are unknown and are not included
-    in the returned distance.
+    Vertical transition distances are not included in the
+    returned distance unless represented by graph edge weights.
     """
 
     if start not in graph or destination not in graph:
@@ -29,12 +30,21 @@ def dijkstra(
     locations = locations or {}
     transitions = transitions or {}
 
-    if accessible_only:
-        # Do not route through staircase nodes in accessible mode.
-        for node in (start, destination):
-            if locations.get(node, {}).get("type") == "staircase":
-                return [], inf
+    def is_inaccessible(node):
+        """Return True if a node cannot be used in accessible mode."""
+        info = locations.get(node, {})
+        location_type = str(info.get("type", "")).lower()
 
+        return (
+            info.get("accessible") is False
+            or location_type in {"staircase", "stairs"}
+        )
+
+    if accessible_only:
+        if is_inaccessible(start) or is_inaccessible(destination):
+            return [], inf
+
+    # Copy the graph so the original graph is not modified.
     adjacency = {
         node: list(neighbours)
         for node, neighbours in graph.items()
@@ -45,14 +55,18 @@ def dijkstra(
         if source not in adjacency or target not in adjacency:
             continue
 
-        transition_type = metadata.get("type", "stairs")
+        transition_type = str(
+            metadata.get("type", "stairs")
+        ).lower()
 
-        if accessible_only and transition_type != "elevator":
+        if accessible_only and transition_type not in {
+            "elevator",
+            "lift",
+        }:
             continue
 
         if accessible_only and (
-            locations.get(source, {}).get("type") == "staircase"
-            or locations.get(target, {}).get("type") == "staircase"
+            is_inaccessible(source) or is_inaccessible(target)
         ):
             continue
 
@@ -67,6 +81,7 @@ def dijkstra(
     while queue:
         distance, current = heapq.heappop(queue)
 
+        # Ignore outdated queue entries.
         if distance != best[current]:
             continue
 
@@ -74,9 +89,10 @@ def dijkstra(
             break
 
         for neighbour, edge_distance in adjacency[current]:
-            if accessible_only and (
-                locations.get(neighbour, {}).get("type") == "staircase"
-            ):
+            if neighbour not in adjacency:
+                continue
+
+            if accessible_only and is_inaccessible(neighbour):
                 continue
 
             new_distance = distance + float(edge_distance)
@@ -84,7 +100,10 @@ def dijkstra(
             if new_distance < best[neighbour]:
                 best[neighbour] = new_distance
                 previous[neighbour] = current
-                heapq.heappush(queue, (new_distance, neighbour))
+                heapq.heappush(
+                    queue,
+                    (new_distance, neighbour),
+                )
 
     if best[destination] == inf:
         return [], inf
@@ -97,6 +116,7 @@ def dijkstra(
         current = previous[current]
 
     path.reverse()
+
     return path, best[destination]
 
 
